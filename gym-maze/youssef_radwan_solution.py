@@ -2,7 +2,7 @@ import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
 from tqdm import tqdm
-from keras.layers import PReLU
+from keras.layers import PReLU, BatchNormalization, Normalization
 from keras.layers import LeakyReLU
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Flatten
@@ -20,7 +20,7 @@ import json
 import requests
 import gym_maze
 from gym_maze.envs.maze_manager import MazeManager
-from youssef_radwan_dependcies import MazeEnvRandom10x10
+from youssef_radwan_dependcies import MazeEnvRandom10x10, WIND_VISITED_MAT_SIZE
 from riddle_solvers import *
 import time
 import traceback
@@ -30,7 +30,6 @@ from tensorflow.keras.optimizers import Adam
 from rl.callbacks import ModelIntervalCheckpoint
 import warnings
 warnings.filterwarnings("ignore")
-
 
 def randomize_rescue_items(maze_size):
         rescue_items_dict = {}
@@ -48,9 +47,11 @@ def randomize_rescue_items(maze_size):
 
 def build_model(actions):
     model = Sequential()   
-    model.add(Dense(100, activation=LeakyReLU(alpha=0.24), input_shape=(1,14)))
-    model.add(Flatten()) 
-    model.add(Dense(100, activation=LeakyReLU(alpha=0.24)))
+    model.add(Dense(32, activation=LeakyReLU(alpha=0.24), input_shape=(1,DIMETIONS)))
+    model.add(Flatten())
+    # model.add(Normalization())
+    model.add(Dense(32, activation=LeakyReLU(alpha=0.24)))
+    # model.add(Normalization())
     model.add(Dense(actions, activation='linear'))
     return model
 
@@ -66,17 +67,17 @@ if __name__ == "__main__":
     sample_maze = np.load("hackathon_sample.npy")
     agent_id = "9" # add your agent id here
     maze_size = 10
-    render = False
+    render = True
     env = MazeEnvRandom10x10(maze_cells=sample_maze, rescue_item_locations=randomize_rescue_items(maze_size), enable_render=render)
-    # riddle_solvers = {'cipher': cipher_solver, 'captcha': captcha_solver, 'pcap': pcap_solver, 'server': server_solver}
     
     n_state, reward, terminated, info = env.step(1)
-    # states = n_state.shape
+    DIMETIONS = len(n_state)
+    print(">>>>>>  ", DIMETIONS)
     actions = env.action_space.n
     model = build_model(actions)
     Adam._name = 'IBM :)'
     dqn = build_agent(model, actions)
-    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=3e-3)
+    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=2e-3)
     dqn.compile(optimizer)
 
     model_checkpoint_callback = ModelIntervalCheckpoint(
@@ -84,12 +85,13 @@ if __name__ == "__main__":
         interval=10000, verbose=1)
 
     
-    history = dqn.fit(env, nb_steps=50000, visualize=render, verbose=1, log_interval=10000, callbacks=[model_checkpoint_callback])
+    history = dqn.fit(env, nb_steps=200000, visualize=render, verbose=1, log_interval=5000, callbacks=[model_checkpoint_callback])
 
     # print(history.history)
     # losses = history.history['episode_reward']
     # plt.plot(losses)
-    scores = dqn.test(env, nb_episodes=4, visualize=False)
+    scores = dqn.test(env, nb_episodes=1, visualize=True)
     # print(np.mean(scores.history['episode_reward']))
-    model.save('./models/saved_model/model')
-    dqn.save_weights('./models/saved_model/weights', overwrite=False)
+    dqn.save_weights('./models/saved_model/', overwrite=True)
+    # dqn.load_weights('./models/saved_model/')
+    model.save('./models/saved_model_model/')

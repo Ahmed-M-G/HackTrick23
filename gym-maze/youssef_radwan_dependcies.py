@@ -10,8 +10,13 @@ import copy
 import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
+import pandas as pd
 
 from gym_maze.envs.maze_view_2d import MazeView2D, RescueItem
+
+WIND_VISITED_MAT_SIZE = 2
+directions = [(0, 0), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
+one_hot_encoding = pd.get_dummies(pd.Series(directions))
 
 class MazeEnv(gym.Env):
     metadata = {
@@ -81,29 +86,54 @@ class MazeEnv(gym.Env):
         return [seed]
     
     # <<<<<<<<<<<<
+    # def reward(self):
+    #     if np.array_equal(self.maze_view.robot, [9,9]):  # find end point
+    #         reward = 100
+    #     elif tuple(self.maze_view.robot) in self.valid_items: # find item
+    #         reward = 50
+    #     elif np.array_equal(self.maze_view.robot, self.prev_position): # wall
+    #         reward = -20
+    #     else:
+    #         # print(self.maze_view.get_rescue_items_locations())
+    #         # get the negative manhaten distance 
+    #         reward = np.sum(-1*np.array(self.maze_view.get_rescue_items_locations()[0])) + -2 * np.linalg.norm(self.maze_view.robot-[9,9])
+    #     return reward
+    
     def reward(self):
-        if np.array_equal(self.maze_view.robot, [9,9]):  # find end point
-            reward = 100
-        elif tuple(self.maze_view.robot) in self.valid_items: # find item
-            reward = 50
+        if np.array_equal(self.maze_view.robot, [9, 9]):  # find end point
+            reward = 150
+        # elif tuple(self.maze_view.robot) in self.valid_items: # find item
+            # increase the number of visits to this cell to large number which minimize the probability of visiting it again
+            # self.visited_cells[tuple(self.maze_view.robot)] = (self.visited_cells[tuple(self.maze_view.robot)][0]+10, self.visited_cells[tuple(self.maze_view.robot)][1])
+            # reward = 50
         elif np.array_equal(self.maze_view.robot, self.prev_position): # wall
-            reward = -20
+            reward = -50
         else:
-            # print(self.maze_view.get_rescue_items_locations())
-            # get the negative manhaten distance 
-            reward = np.sum(-1*np.array(self.maze_view.get_rescue_items_locations()[0])) + -2 * np.linalg.norm(self.maze_view.robot-[9,9])
+            # Compute Euclidean distance to end point and item locations
+            end_distance = np.linalg.norm(self.maze_view.robot - [9, 9])
+            item_distances = [np.linalg.norm(self.maze_view.robot - item) for item in self.valid_items]
+            # Use negative distances as rewards, with discount factor
+            reward = -np.min([end_distance] + item_distances)
+
+            # penality for visiting previously visited locations or locations with multiple items
+            reward += -self.visited_cells[tuple(self.maze_view.robot)][0]*0.7
+
         return reward
 
-# 1- penality redandant movments 
-# 2- penality visite the same cell ketttter
-# 3- reward get an item  XXX
-# 4- penality in case doing a wrong action (like go throw wall) XXX
+    # 1- penality redandant movments 
+    # 2- penality visite the same cell ketttter
+    # 3- reward get an item  XXX
+    # 4- penality in case doing a wrong action (like go throw wall) XXX
 
     def step(self, action):
         info = {}
         self.prev_action = action
         self.prev_position = copy.deepcopy(self.maze_view.robot)
         self.maze_view.move_robot(self.ACTION[action])
+
+        #increase the number of visits
+        self.visited_cells[tuple(self.maze_view.robot)] = (self.visited_cells[tuple(self.maze_view.robot)][0]+1, self.visited_cells[tuple(self.maze_view.robot)][1])
+
         info['rescued_items'] = self.maze_view.rescued_items
         self.state = self.get_current_flatten_state()
         
@@ -136,15 +166,34 @@ class MazeEnv(gym.Env):
         return self.state, reward, terminated, truncated, info
 
 
+    def get_flatten_visited_cells(self, num=5):
+        visiting_matrix = np.reshape([v[0] if v[0] > 0 else 1 for k,v in self.visited_cells.items()], (10,10))
+        submatrices = [np.sum(visiting_matrix[i:i+num, j:j+num]) for i in range(0, 10, num) for j in range(0, 10, num)]
+        submatrices = np.array(submatrices).reshape(int(10/num), int(10/num))
+        norm_submatrices = submatrices/np.sum(submatrices)
+        return 1-norm_submatrices.flatten()
+    
+
     def get_current_flatten_state(self):
         state = []
         state.extend(self.maze_view.robot)
-        state.extend(self.maze_view.get_rescue_items_locations()[0])
+
+        # add the new distance promising scores
+        distance = np.array(self.maze_view.get_rescue_items_locations()[0])
+        minus_one_flags = distance == -1
+        sum_rest = sum(distance[~minus_one_flags])
+        new_out = (sum_rest - distance)/sum_rest
+        new_out[minus_one_flags] = 0
+        state.extend(list(new_out))
+
         for direction in self.maze_view.get_rescue_items_locations()[1]:
+            direction = one_hot_encoding[tuple(direction)].to_list()
             state.extend(direction)
+        state.extend(self.get_flatten_visited_cells(WIND_VISITED_MAT_SIZE))
         return np.array(state).squeeze()
     
     def reset(self):
+        self.visited_cells = dict(((c,r), (0, set()))for r in range(10) for c in range(10))
         self.maze_view.reset_robot()
         self.state = self.get_current_flatten_state()
         self.valid_items = copy.deepcopy(self.rescue_item_locations)
