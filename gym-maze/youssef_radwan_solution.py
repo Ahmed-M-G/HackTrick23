@@ -67,7 +67,7 @@ if __name__ == "__main__":
     sample_maze = np.load("hackathon_sample.npy")
     agent_id = "9" # add your agent id here
     maze_size = 10
-    render = True
+    render = False
     env = MazeEnvRandom10x10(maze_cells=sample_maze, rescue_item_locations=randomize_rescue_items(maze_size), enable_render=render)
     
     n_state, reward, terminated, info = env.step(1)
